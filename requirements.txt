@@ -1,0 +1,12 @@
+beautifulsoup4==4.12.2
+certifi==2023.7.22
+charset-normalizer==3.2.0
+colorama==0.4.6
+idna==3.4
+pyTelegramBotAPI==4.12.0
+requests==2.31.0
+soupsieve==2.4.1
+tqdm==4.66.1
+ufc-api==0.0.1
+UFC-Data-Scraper==1.0.0
+urllib3==2.0.4
