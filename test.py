@@ -57,7 +57,7 @@ cursor.execute('SELECT * FROM user_match_predictions')
 user_predictions = cursor.fetchall()
 
 # Вывод данных о количестве угаданных боев
-print("Информация из таблицы user_match_predictions:")
+print("\nИнформация из таблицы user_match_predictions:")
 for row in user_predictions:
     print(f"User ID: {row[0]}, Correct Predictions: {row[1]}")
 
