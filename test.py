@@ -11,7 +11,8 @@ selected_matches = cursor.fetchall()
 # Вывод данных о выбранных боях
 print("Информация из таблицы selected_matches:")
 for row in selected_matches:
-    print(f"Event: {row[1]}, Fighter 1: {row[2]}, Fighter 2: {row[3]}")
+    print(
+        f"Event: {row[1]}, Fighter 1: {row[2]}, {row[4]}, Fighter 2: {row[3]}, {row[5]}")
 
 # Закрытие соединения с базой данных
 conn.close()
@@ -64,4 +65,3 @@ for row in user_predictions:
 # Закрытие соединения с базой данных
 cursor.close()
 conn.close()
-

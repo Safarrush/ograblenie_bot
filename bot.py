@@ -9,6 +9,7 @@ bot = telebot.TeleBot('6275603125:AAGEl6ysowwR5DidT9eZ0MgnSuU8kIfWPyI')
 
 
 upcoming_events = {}
+user_used_command = {}
 
 
 @bot.message_handler(commands=['start'])
@@ -22,23 +23,42 @@ user_winners = {}
 @bot.message_handler(commands=['select_winners'])
 def select_winners(message):
     user_id = message.from_user.id
+    try:
+        conn = sqlite3.connect('selected_matches.db')
+        cursor = conn.cursor()
+        cursor.execute(
+            'SELECT user_id FROM user_winner_selections WHERE user_id = ?', (user_id,))
+        user_exists = cursor.fetchone()
+        cursor.close()
+        conn.close()
+    except:
+        bot.send_message(
+            message.chat.id, "Упс. Пока еще рано!.")
 
-    conn = sqlite3.connect('selected_matches.db')
-    cursor = conn.cursor()
+    if user_exists:
+        bot.reply_to(message, "Вы уже сделали свой выбор.")
+    else:
+        try:
+            conn = sqlite3.connect('selected_matches.db')
+            cursor = conn.cursor()
 
-    cursor.execute('SELECT * FROM selected_matches')
-    selected_matches = cursor.fetchall()
+            cursor.execute('SELECT * FROM selected_matches')
+            selected_matches = cursor.fetchall()
 
-    cursor.close()
-    conn.close()
+            cursor.close()
+            conn.close()
 
-    selected_matches_numbers = [match[0] for match in selected_matches]
+            selected_matches_numbers = [match[0] for match in selected_matches]
 
-    process_winner(message, user_id, selected_matches_numbers, index=0)
+            process_winner(message, user_id, selected_matches_numbers, index=0)
+        except:
+            bot.send_message(
+                message.chat.id, 'Пока рано!'
+            )
 
 
 def process_winner(message, user_id, selected_matches_numbers, index=0):
-    if index >= len(selected_matches_numbers):
+    if index >= len(selected_matches_numbers) and message.text not in ['/select_winners']:
         bot.reply_to(message, "Все выборы победителей были успешно записаны.")
         return
 
@@ -61,39 +81,40 @@ def process_winner(message, user_id, selected_matches_numbers, index=0):
 
 
 def process_winner_selection_step(message, user_id, selected_matches_numbers, index, match_id):
-    winner_index = int(message.text)
+    winner_index = message.text.strip()  # Убираем лишние пробелы
 
-    conn = sqlite3.connect('selected_matches.db')
-    cursor = conn.cursor()
+    if winner_index == '1' or winner_index == '2':
+        conn = sqlite3.connect('selected_matches.db')
+        cursor = conn.cursor()
 
-    cursor.execute('SELECT * FROM selected_matches WHERE id = ?', (match_id,))
-    match_data = cursor.fetchone()
+        cursor.execute(
+            'SELECT * FROM selected_matches WHERE id = ?', (match_id,))
+        match_data = cursor.fetchone()
 
-    cursor.close()
-    conn.close()
+        cursor.close()
+        conn.close()
 
-    if winner_index == 1:
-        winner = match_data[2]
-    elif winner_index == 2:
-        winner = match_data[3]
+        if winner_index == '1':
+            winner = match_data[2]
+        else:
+            winner = match_data[3]
+
+        conn = sqlite3.connect('selected_matches.db')
+        cursor = conn.cursor()
+
+        cursor.execute('INSERT INTO user_winner_selections (user_id, match_id, winner) VALUES (?, ?, ?)',
+                       (user_id, match_id, winner))
+        conn.commit()
+
+        cursor.close()
+        conn.close()
+
+        index += 1
+        process_winner(message, user_id, selected_matches_numbers, index)
     else:
         bot.reply_to(
             message, "Некорректный выбор. Пожалуйста, выберите 1 или 2.")
-        return
-
-    conn = sqlite3.connect('selected_matches.db')
-    cursor = conn.cursor()
-
-    cursor.execute('INSERT INTO user_winner_selections (user_id, match_id, winner) VALUES (?, ?, ?)',
-                   (user_id, match_id, winner))
-    conn.commit()
-
-    cursor.close()
-    conn.close()
-
-    index += 1
-    process_winner(message, user_id, selected_matches_numbers, index)
+        process_winner(message, user_id, selected_matches_numbers, index)
 
 
 bot.polling()
-conn.close()
