@@ -3,6 +3,7 @@ import requests
 from bs4 import BeautifulSoup
 import sqlite3
 import re
+from telebot import types
 
 event_url = ""
 # Замените 'YOUR_BOT_TOKEN' на токен вашего бота
@@ -45,9 +46,57 @@ cursor.execute('''
         correct_predictions INTEGER
     )
 ''')
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS play (
+        id INTEGER
+    )
+''')
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS url (
+        url_adress TEXT
+    )
+''')
 conn.commit()
 
 upcoming_events = {}
+
+
+@bot.callback_query_handler(func=lambda call: call.data == 'stop')
+def playing_boy(call):
+    markup = types.InlineKeyboardMarkup()
+    item1 = types.InlineKeyboardButton(
+        "Возобновить прием заявок!", callback_data='restart')
+    markup.add(item1)
+    conn = sqlite3.connect('selected_matches.db')
+    cursor = conn.cursor()
+    cursor.execute(
+        'INSERT INTO play (id) VALUES (1)')
+    conn.commit()
+
+    cursor.close()
+    conn.close()
+    bot.send_message(call.message.chat.id,
+                     'Прием заявок остановлен!', reply_markup=markup)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == 'restart')
+def restart_boy(call):
+    markup = types.InlineKeyboardMarkup()
+    item1 = types.InlineKeyboardButton(
+        "Остановить прием заявок!", callback_data='stop')
+    item2 = types.InlineKeyboardButton(
+        "Загрузить победителей", callback_data='update_winners')
+    markup.add(item1, item2)
+    conn = sqlite3.connect('selected_matches.db')
+    cursor = conn.cursor()
+    cursor.execute(
+        'INSERT INTO play (id) VALUES (0)')
+    conn.commit()
+
+    cursor.close()
+    conn.close()
+    bot.send_message(call.message.chat.id,
+                     'Прием заявок возобновлен!', reply_markup=markup)
 
 
 def update_upcoming_events():
@@ -91,17 +140,27 @@ def restrict_access(func):
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "Привет! Я бот, который поможет тебе поучаствовать в розыгрыше. Просто напиши /select_winners для выбора бойцов победителей предстоящего турнира.")
+    markup = types.InlineKeyboardMarkup()
+    item1 = types.InlineKeyboardButton(
+        "Посмотреть турниры", callback_data='get_upcoming_events')
+    item2 = types.InlineKeyboardButton(
+        "Очистить данные с прошлого турнира", callback_data='clear_selected_matches')
+    markup.add(item1, item2)
+    bot.send_message(message.chat.id, "Привет! Я бот, который поможет тебе поучаствовать в розыгрыше. Просто напиши /select_winners для выбора бойцов победителей предстоящего турнира.", reply_markup=markup)
 
 
-@bot.message_handler(commands=['get_upcoming_events'])
+@bot.callback_query_handler(func=lambda call: call.data == 'get_upcoming_events')
 @restrict_access
-def get_upcoming_events(message):
+def get_upcoming_events(call):
+    markup = types.InlineKeyboardMarkup()
+    item = types.InlineKeyboardButton(
+        "Выбрать турнир", callback_data='select_event')
+    markup.add(item)
     update_upcoming_events()  # Обновляем список турниров
     events_list = "\n".join(
         [f"{i}. {event}" for i, event in upcoming_events.items()])
-    bot.reply_to(
-        message, f"Список предстоящих турниров:\n{events_list}\n\nВыберите номер турнира командой /select_event <номер>.")
+    bot.send_message(
+        call.message.chat.id, f"Список предстоящих турниров:\n{events_list}\n\nВыберите номер турнира, нажав кнопку ниже.", reply_markup=markup)
 
 
 @bot.message_handler(commands=['all_upcoming_events'])
@@ -110,8 +169,8 @@ def all_upcoming_events(message):
     update_upcoming_events()  # Обновляем список турниров
     events_list_text = "\n".join(
         [f"{i + 1}. {event}" for i, event in upcoming_events.items()])
-    bot.reply_to(
-        message, f"Список всех предстоящих турниров:\n{events_list_text}")
+    bot.send_message(
+        message.chat.id, f"Список всех предстоящих турниров:\n{events_list_text}")
 
 
 matches_dict = {}
@@ -164,11 +223,12 @@ def process_selected_matches(message, selected_event):
         # Вывод информации о выбранных боях
         events_text = "\n".join(
             [f"{i}. {event}" for i, event in matches_dict.items()])
-        bot.reply_to(message, f"Список выбранных боев:\n{events_text}")
+        bot.send_message(
+            message.chat.id, f"Список выбранных боев:\n{events_text}")
 
         # Запрос пользователя о выборе боев для записи в базу данных
-        bot.reply_to(
-            message, "Выберите бои для записи в базу данных, перечислив номера через запятую (например: 1, 3, 5).")
+        bot.send_message(
+            message.chat.id, "Выберите бои для записи в базу данных, перечислив номера через запятую (например: 1, 3, 5).")
 
         # Ожидание ответа от пользователя
         bot.register_next_step_handler(
@@ -213,6 +273,12 @@ def process_fighter1_coefficient(message, selected_event, selected_matches_numbe
 
 
 def process_fighter2_coefficient(message, selected_event, selected_matches_numbers, coefficients_dict, index, match):
+    markup = types.InlineKeyboardMarkup()
+    item = types.InlineKeyboardButton(
+        "Загрузить победителей", callback_data='update_winners')
+    item2 = types.InlineKeyboardButton(
+        "Остановить прием заявок", callback_data='stop')
+    markup.add(item, item2)
     try:
         coefficients_dict[match]["fighter2_coefficient"] = float(message.text)
 
@@ -254,8 +320,8 @@ def process_fighter2_coefficient(message, selected_event, selected_matches_numbe
             cursor.close()
             conn.close()
 
-            bot.reply_to(
-                message, "Выбранные бои и коэффициенты были успешно записаны в базу данных.")
+            bot.send_message(
+                message.chat.id, "Выбранные бои и коэффициенты были успешно записаны в базу данных.", reply_markup=markup)
     except:
         bot.send_message(message.chat.id, 'Неверный формат. Давай все заново!')
         process_coefficients(
@@ -270,7 +336,8 @@ def contains_only_digits(text):
 
 
 def input_selected_matches(message, selected_event):
-    bot.reply_to(message, "Введите номера выбранных боев, разделяя запятыми:")
+    bot.send_message(
+        message.chat.id, "Введите номера выбранных боев, разделяя запятыми:")
     bot.register_next_step_handler(
         message, finalize_selected_matches, selected_event)
 
@@ -287,35 +354,58 @@ def finalize_selected_matches(message, selected_event):
                                         for num in selected_matches_numbers]
             selected_matches_numbers = [
                 num for num in selected_matches_numbers]  # Корректируем индексы
-            bot.reply_to(
-                message, "Для каждого бойца введите коэффициенты в порядке их появления:")
+            bot.send_message(
+                message.chat.id, "Для каждого бойца введите коэффициенты в порядке их появления:")
             process_coefficients(message, selected_event,
                                  selected_matches_numbers, {})
         except:
-            bot.reply_to(
-                message, "Некорректные символы! Пожалуйста, введите только цифры, разделенные запятыми.")
+            bot.send_message(
+                message.chat.id, "Некорректные символы! Пожалуйста, введите только цифры, разделенные запятыми.")
             input_selected_matches(message, selected_event)
     else:
-        bot.reply_to(
-            message, "Некорректные символы! Пожалуйста, введите только цифры, разделенные запятыми.")
+        bot.send_message(
+            message.chat.id, "Некорректные символы! Пожалуйста, введите только цифры, разделенные запятыми.")
         input_selected_matches(message, selected_event)
 
 
 selected_event = None
 
 
-@bot.message_handler(commands=['select_event'])
-@restrict_access
-def select_event(message):
+states = {}
+
+# Обработчик команды /select_event
+
+
+@bot.callback_query_handler(func=lambda call: call.data == 'select_event')
+def select_event(call):
+    # Устанавливаем состояние 'waiting_for_event_number' для пользователя
+    states[call.message.chat.id] = 'waiting_for_event_number'
+
+    # Отправляем сообщение, ожидая ввод номера турнира
+    bot.send_message(call.message.chat.id, "Введите номер турнира для выбора:")
+
+# Обработчик текстового ввода после команды /select_event
+
+
+@bot.message_handler(func=lambda message: states.get(message.chat.id) == 'waiting_for_event_number')
+def process_event_number(message):
     global selected_event
-    event_number = None
+    event_number = message.text.strip()
+
     try:
-        if message.text.split()[1].isdigit():
-            event_number = int(message.text.split()[1])
-        if event_number in upcoming_events:
-            selected_event = upcoming_events[event_number]
-            bot.reply_to(
-                message, f"Выбран турнир: {selected_event}. Загружаю информацию о боях...")
+        if event_number.isdigit() and int(event_number) in upcoming_events:
+            selected_event = upcoming_events[int(event_number)]
+            print(selected_event[1])
+            conn = sqlite3.connect('selected_matches.db')
+            cursor = conn.cursor()
+            cursor.execute(
+                'INSERT OR REPLACE INTO url (url_adress) VALUES (?)', (selected_event[1],))
+            conn.commit()
+
+            cursor.close()
+            conn.close()
+            bot.send_message(
+                message.chat.id, f"Выбран турнир: {selected_event}. Загружаю информацию о боях...")
             parse_and_store_matches(selected_event)
 
             # Открываем новый курсор для работы с базой данных
@@ -332,12 +422,13 @@ def select_event(message):
             bot.reply_to(message, "Неверный номер турнира.")
     except (IndexError, ValueError):
         bot.reply_to(
-            message, "Используйте команду /select_event <номер> для выбора турнира.")
+            message, "Используйте команду /select_event для выбора турнира.")
 
 
-@bot.message_handler(commands=['clear_selected_matches'])
+@bot.callback_query_handler(func=lambda call: call.data == 'clear_selected_matches')
 @restrict_access
-def clear_selected_matches(message):
+def clear_selected_matches(call):
+
     try:
         # Открываем соединение с базой данных
         conn = sqlite3.connect('selected_matches.db')
@@ -348,37 +439,53 @@ def clear_selected_matches(message):
         cursor.execute('DELETE FROM user_winner_selections')
         cursor.execute('DELETE FROM winners')
         cursor.execute('DELETE FROM user_match_predictions')
+        cursor.execute('DELETE from play')
         conn.commit()
 
         # Закрываем соединение с базой данных
         cursor.close()
         conn.close()
 
-        bot.reply_to(
-            message, "Все записи выбранных боев были успешно удалены из базы данных.")
+        bot.send_message(
+            call.message.chat.id, "Все записи выбранных боев были успешно удалены из базы данных.")
     except:
         bot.send_message(
-            message.chat.id, 'Упс. Что-то не так! Начни заново'
+            call.message.chat.id, 'Упс. Что-то не так! Начни заново'
         )
 
 
-@bot.message_handler(commands=['update_winners'])
+@bot.callback_query_handler(func=lambda call: call.data == 'update_winners')
 @restrict_access
-def update_winners(message):
+def update_winners(call):
     # Пример URL страницы с боями
-    global selected_event
-    # event_url = 'http://www.ufcstats.com/event-details/89a407032911e27e'
+    markup = types.InlineKeyboardMarkup()
+    item = types.InlineKeyboardButton(
+        "Подвести итог", callback_data='calculate_predictions')
+    markup.add(item)
+   # global selected_event
+    selected_event = None
+    conn = sqlite3.connect('selected_matches.db')
+    cursor = conn.cursor()
+
+    # Запрос всех записей из таблицы user_match_predictions
+    status = cursor.execute('SELECT * FROM url')
+    for row in status:
+        selected_event = row[0]
+    cursor.close()
+    conn.close()
+    # event_url = 'http://www.ufcstats.com/event-details/ef61d9f5176b3200'
+    print(selected_event)
     try:
         if selected_event is None:
-            bot.reply_to(
-                message, "Сначала выберите турнир с помощью команд /get_upcoming_events и /select_event.")
+            bot.send_message(
+                call.message.chat.id, "Сначала выберите турнир с помощью команд /get_upcoming_events и /select_event.")
         else:
-            parse_and_store_winners(selected_event[1])
-            bot.reply_to(
-                message, "Информация о победителях была успешно обновлена.")
+            parse_and_store_winners(selected_event)
+            bot.send_message(
+                call.message.chat.id, "Информация о победителях была успешно обновлена.", reply_markup=markup)
     except:
         bot.send_message(
-            message.chat.id, 'Упс. Что-то не так! Начни заново'
+            call.message.chat.id, 'Упс. Что-то не так! Начни заново'
         )
 
 
@@ -475,12 +582,12 @@ def calculate_and_store_predictions():
         pass
 
 
-@bot.message_handler(commands=['calculate_predictions'])
+@bot.callback_query_handler(func=lambda call: call.data == 'calculate_predictions')
 @restrict_access
-def calculate_predictions(message):
+def calculate_predictions(call):
     calculate_and_store_predictions()
-    bot.reply_to(
-        message, "Расчет и запись количества угаданных боев выполнены.")
+    bot.send_message(
+        call.message.chat.id, "Расчет и запись количества угаданных боев выполнены.")
 
 
 bot.polling()

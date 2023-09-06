@@ -65,3 +65,25 @@ for row in user_predictions:
 # Закрытие соединения с базой данных
 cursor.close()
 conn.close()
+
+conn = sqlite3.connect('selected_matches.db')
+cursor = conn.cursor()
+
+# Запрос всех записей из таблицы user_match_predictions
+status = cursor.execute('SELECT * FROM play')
+print("\nИнформация из таблицы play")
+for row in status:
+    print(f"{row[0]}")
+cursor.close()
+conn.close()
+
+conn = sqlite3.connect('selected_matches.db')
+cursor = conn.cursor()
+
+# Запрос всех записей из таблицы user_match_predictions
+status = cursor.execute('SELECT * FROM url')
+print("\nИнформация из таблицы url")
+for row in status:
+    print(f"{row[0]}")
+cursor.close()
+conn.close()
