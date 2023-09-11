@@ -43,7 +43,8 @@ cursor.execute('''
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS user_match_predictions (
         user_id INTEGER PRIMARY KEY,
-        correct_predictions INTEGER
+        correct_predictions INTEGER,
+        place INTEGER
     )
 ''')
 cursor.execute('''
@@ -146,11 +147,12 @@ def send_welcome(message):
     item2 = types.InlineKeyboardButton(
         "Очистить данные с прошлого турнира", callback_data='clear_selected_matches')
     markup.add(item1, item2)
-    bot.send_message(message.chat.id, "Привет! Я бот, который поможет тебе поучаствовать в розыгрыше. Просто напиши /select_winners для выбора бойцов победителей предстоящего турнира.", reply_markup=markup)
+    bot.send_message(
+        message.chat.id, "Привет! Я бот, который поможет тебе поучаствовать в розыгрыше.", reply_markup=markup)
 
 
 @bot.callback_query_handler(func=lambda call: call.data == 'get_upcoming_events')
-@restrict_access
+# @restrict_access
 def get_upcoming_events(call):
     markup = types.InlineKeyboardMarkup()
     item = types.InlineKeyboardButton(
@@ -164,7 +166,7 @@ def get_upcoming_events(call):
 
 
 @bot.message_handler(commands=['all_upcoming_events'])
-@restrict_access
+# @restrict_access
 def all_upcoming_events(message):
     update_upcoming_events()  # Обновляем список турниров
     events_list_text = "\n".join(
@@ -426,7 +428,7 @@ def process_event_number(message):
 
 
 @bot.callback_query_handler(func=lambda call: call.data == 'clear_selected_matches')
-@restrict_access
+# @restrict_access
 def clear_selected_matches(call):
 
     try:
@@ -440,6 +442,8 @@ def clear_selected_matches(call):
         cursor.execute('DELETE FROM winners')
         cursor.execute('DELETE FROM user_match_predictions')
         cursor.execute('DELETE from play')
+        cursor.execute('DELETE from url')
+        cursor.execute('DELETE from players')
         conn.commit()
 
         # Закрываем соединение с базой данных
@@ -455,7 +459,7 @@ def clear_selected_matches(call):
 
 
 @bot.callback_query_handler(func=lambda call: call.data == 'update_winners')
-@restrict_access
+# @restrict_access
 def update_winners(call):
     # Пример URL страницы с боями
     markup = types.InlineKeyboardMarkup()
@@ -504,7 +508,10 @@ def parse_and_store_winners(event_url):
         for match_row in soup.find_all("tr", class_="b-fight-details__table-row"):
             fight_name_elems = match_row.find_all(
                 "a", class_="b-link b-link_style_black")
-            if len(fight_name_elems) >= 2:
+            win_elements = match_row.find_all(
+                "i", class_="b-flag__text")
+            wins = [win.get_text(strip=True) for win in win_elements]
+            if len(fight_name_elems) >= 2 and wins[0] == 'win':
                 winner_name = fight_name_elems[0].get_text(strip=True)
                 winners.append((event_name, winner_name))
 
@@ -527,6 +534,8 @@ def calculate_and_store_predictions():
         cursor.execute('SELECT DISTINCT user_id FROM user_winner_selections')
         user_ids = [row[0] for row in cursor.fetchall()]
 
+        user_scores = []
+
         for user_id in user_ids:
             # Получаем список выбранных боев пользователя
             cursor.execute(
@@ -544,50 +553,57 @@ def calculate_and_store_predictions():
                 fighter1_name, fighter2_name, fighter1_coefficient, fighter2_coefficient = match_info
                 user_winner = user_winner.strip()
                 cursor.execute(
-                    'SELECT winner_name FROM winners WHERE event_name = ? AND winner_name = ?', (match_info[0], user_winner))
-                cursor.fetchone()
-                if match_info[0] == user_winner:
-                    if user_winner.strip() == fighter1_name.strip():
+                    'SELECT winner_name FROM winners WHERE winner_name = ?', (user_winner,))
+                a = cursor.fetchone()
+                if a:
+                    if a[0].strip() == fighter1_name:
                         user_score += fighter1_coefficient
-                    elif user_winner.strip() == fighter2_name.strip():
+                    elif a[0].strip() == fighter2_name:
                         user_score += fighter2_coefficient
                 else:
                     user_score += 0
 
-            print(f'user_id: {user_id}, user_score: {user_score}')
+            user_scores.append((user_id, round(user_score, 2)))
 
-            # Записываем баллы пользователя в таблицу
-            cursor.execute('INSERT OR REPLACE INTO user_match_predictions (user_id, correct_predictions) VALUES (?, ?)',
-                           (user_id, user_score))
+        # Сортируем пользователей по баллам в убывающем порядке
+        user_scores.sort(key=lambda x: x[1], reverse=True)
+
+        for index, (user_id, user_score) in enumerate(user_scores, start=1):
+            # Записываем место пользователя и его баллы в таблицу
+            cursor.execute('INSERT OR REPLACE INTO user_match_predictions (user_id, correct_predictions, place) VALUES (?, ?, ?)',
+                           (user_id, user_score, index))
+
+            # Отправляем сообщение пользователю о его месте и баллах
+            bot.send_message(
+                user_id, f"Вы заняли {index}-е место с {user_score} баллами!")
 
         conn.commit()
         cursor.close()
         conn.close()
 
-        # Находим победителя и отправляем сообщение
-        conn = sqlite3.connect('selected_matches.db')
-        cursor = conn.cursor()
-
-        cursor.execute(
-            'SELECT user_id, correct_predictions FROM user_match_predictions ORDER BY correct_predictions DESC LIMIT 1')
-        winner = cursor.fetchone()
-
-        if winner:
-            bot.send_message(
-                winner[0], f"Пользователь с ID {winner[0]} является победителем с {winner[1]} баллами!")
-
-        cursor.close()
-        conn.close()
-    except:
-        pass
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
 
 
 @bot.callback_query_handler(func=lambda call: call.data == 'calculate_predictions')
-@restrict_access
+# @restrict_access
 def calculate_predictions(call):
     calculate_and_store_predictions()
     bot.send_message(
         call.message.chat.id, "Расчет и запись количества угаданных боев выполнены.")
+
+
+@bot.message_handler(commands=['count'])
+def count_of_players(message):
+    conn = sqlite3.connect('selected_matches.db')
+    cursor = conn.cursor()
+
+    col = cursor.execute('SELECT Count(*) FROM players')
+    for row in col:
+        count = row[0]
+        bot.send_message(message.chat.id, f'Количество игроков: {count}')
+    cursor.close()
+    conn.close()
 
 
 bot.polling()
